@@ -1,0 +1,196 @@
+<?php
+/**
+ * Created by PhpStorm.
+ * User: Roberto
+ * Date: 02/06/2016
+ * Time: 18:27
+ */
+
+/**
+ * Implements hook_menu().
+ */
+function bday_alert_menu() {
+    $items = array();
+
+    $items['alerts/bday/register'] = array(
+        'title' => t('Birthday Alerts Registration'),
+        'description' => 'Birthday Alerts Registration Form',
+        'page callback' => 'drupal_get_form',
+        'page arguments' => array('bday_alert_form'),
+        'access callback' => TRUE
+    );
+
+    $items['admin/alerts/bday/list'] = array(
+      'title' => t('Birthday Alerts List'),
+      'description' => 'Birthday Alerts List',
+      'page callback' => 'list_persons',
+      'access callback' => TRUE,
+    );
+
+    return $items;
+}
+
+/**
+ * Implements hook_theme().
+ */
+function bday_alert_theme(){
+    return array(
+      'bday_alert_mail_header' => array(
+        'variables' => array('user_alert' => NULL),
+        'template' => 'bday-alert-mail-header',
+        'type' => 'theme',
+        'path' => drupal_get_path('module', 'bday_alert') . '/theme',
+      ),
+      'bday_alert_mail_body' => array(
+        'variables' => array('today_bdays' => NULL),
+        'template' => 'bday-alert-mail-body',
+        'type' => 'theme',
+        'path' => drupal_get_path('module', 'bday_alert') . '/theme',
+      )
+    );
+}
+
+/**
+ * Implements hook_cron().
+ */
+function bday_alert_cron(){
+    $query = db_select('persons','p');
+    $query->fields('p', array("pid", "name", "birthday","email"));
+    $result = $query->execute();
+    $to = array();
+    $today_bdays = array();
+    while($row = $result->fetchObject()) {
+        $to[] = $row;
+        if(getDaysLeft($row->birthday) == 0){
+            $today_bdays[] = $row;
+        }
+    }
+    if(count($today_bdays)>0) {
+        $body = theme('bday_alert_mail_body', array('today_bdays' => $today_bdays));
+        foreach($to as $user){
+            $header = theme('bday_alert_mail_header', array('user_alert' => $user->name));
+            $params['to'] = $user->email;
+            $params['body'] = $header.$body;
+            global $language;
+            drupal_mail('bday_alert', 'bday', $user->email, $language->language, $params);
+        }
+    }
+}
+/**
+ * Implements hook_mail().
+ */
+function bday_alert_mail ($key, &$message, $params) {
+    switch ($key) {
+        case 'bday':
+            // Set headers etc
+            $message['to'] = $params['to'];
+            $message['subject'] = t("Today's Birthdays");
+            $message['body'][] = $params['body'];
+            break;
+    }
+}
+
+/**
+ * Implements hook_form().
+ */
+function bday_alert_form($form, &$form_state) {
+
+    $form['name'] = array(
+        '#title' => t('Name'),
+        '#type' => 'textfield',
+        '#required' => TRUE,
+        '#default_value' => "",
+    );
+
+    $form['birthday'] = array(
+      '#type' => 'date_popup',
+      '#title' => t("Your Birth Date"),
+      '#required' => TRUE,
+      '#date_format' => 'Y-m-d',
+      '#date_year_range' => '-120:0',
+      '#attributes' => array('autocomplete' =>'off','readonly' => 'readonly'),
+      '#default_value' => date('Y-m-d'),
+    );
+
+    $form['submit_button'] = array(
+        '#type' => 'submit',
+        '#value' => t('Submit'),
+    );
+
+    return $form;
+}
+
+/**
+ * Implements hook_form_validate().
+ */
+function bday_alert_form_validate($form, &$form_state) {
+    $age = getAge($form_state['values']['birthday']);
+    if($age < 18){
+        form_set_error('birthday', t('You must have more than 18 years old.'));
+    }
+}
+
+/**
+ * Implements hook_form_submit().
+ */
+function bday_alert_form_submit($form, &$form_state) {
+    $name = $form_state['values']['name'];
+    $birthday = $form_state['values']['birthday'];
+    $result = db_query("INSERT INTO {persons} (name, birthday) VALUES(:name,:birthday)", array(':name' => $name, ':birthday' => $birthday));
+    if($result){
+        drupal_set_message('Registration successful');
+    }
+}
+
+
+function list_persons() {
+    $header = array('ID', 'Name', 'Birthdate', 'Age', 'Days Left');
+    $rows = array();
+    $query = db_select('persons','p');
+    $query->fields('p', array("pid", "name", "birthday"));
+    $query = $query->extend('TableSort')->extend('PagerDefault')->limit(5);
+    $result = $query->execute();
+    while($row = $result->fetchObject()){
+        // Fill the table rows
+        $rows[] = array(
+          $row->pid,
+          $row->name,
+          $row->birthday,
+          getAge($row->birthday),
+          getDaysLeft($row->birthday)
+        );
+    }
+    $output = theme_table(
+        array(
+          "header" => $header,
+          "rows" => $rows,
+          "attributes" => array(),
+          "sticky" => true,
+          "caption" => "",
+          "colgroups" => array(),
+          "empty" => t("There is no info to display")
+        )
+      ).theme("pager");
+    return $output;
+}
+
+function getAge($birthdate){
+    $now = new DateObject('now');
+    $born_date = new DateObject($birthdate);
+    return $now->difference($born_date, 'years');
+}
+
+function getDaysLeft($birthdate){
+    $now = new DateObject('now');
+    $born_date = new DateObject($birthdate);
+    $now_arr = $now->toArray();
+    $born_date_arr = $born_date->toArray();
+    if(intval($now_arr['month'])*intval($now_arr['day']) > intval($born_date_arr['month'])*intval($born_date_arr['day'])){
+        $next_year = strval(intval($now_arr['year']) + 1);
+    }
+    else{
+        $next_year = strval(intval($now_arr['year']));
+    }
+    $born_date = new DateObject($next_year . '-' . $born_date_arr['month'] . '-' . $born_date_arr['day']);
+    return $born_date->difference($now, 'days');
+}

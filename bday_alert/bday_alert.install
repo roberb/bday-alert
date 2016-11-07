@@ -1,0 +1,35 @@
+<?php
+
+/**
+ * @file
+ * Install, update and uninstall functions for the Date module.
+ */
+
+/**
+ * Implements hook_schema().
+ */
+function bday_alert_schema(){
+
+    $schema['persons'] = array(
+        'description' => 'persons',
+        'fields' => array(
+            'pid' => array(
+                'type' => 'serial',
+                'not null' => TRUE),
+            'name' => array(
+                'type' => 'varchar',
+                'length' => 50,
+                'not null' => TRUE),
+            'birthday' => array(
+                'type' => 'datetime',
+                'mysql_type' => 'datetime',
+                'not null' => TRUE),
+            'email' => array(
+                'type' => 'varchar',
+                'length' => 150,
+                'not null' => TRUE)
+        ),
+        'primary key' => array('pid'),
+    );
+return $schema;
+}
